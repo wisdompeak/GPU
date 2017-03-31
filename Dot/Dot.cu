@@ -10,13 +10,13 @@ __global__ void dot( float *a, float *b, float *c )
   
   cache[j] += a[i]*b[i];
 
-  __syncthreads();
-
+  __syncthreads(); // 重新启动一次threadIdx的遍历
+  
   int k=threadsPerBlock/2;
   while (k>0)
   {
     if (j<k) cache[j]+=cache[j+k];
-    __syncthreads();
+    __syncthreads(); // 重新启动一次threadIdx的遍历  
     k = k/2;
   }
 
