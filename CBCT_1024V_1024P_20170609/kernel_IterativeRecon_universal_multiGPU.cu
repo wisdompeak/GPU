@@ -1,10 +1,5 @@
-/********
- * This code integrate the functions performing both CBCT and multi-layer FBCT.
- * The flag "FBCT" will automatically select the CBCT/FBCT branches.
- */
 
-
-__global__ void forward_ray_driven_3d_kernel_correction(float *d_f , float *d_proj_correction, float *d_proj_data, float sin_theta, float cos_theta, int command)
+__global__ void forward_ray_driven_3d_kernel_correction_multiGPU(float *d_f , float *d_proj_correction, float *d_proj_data, float sin_theta, float cos_theta, int subPrjIdx, int command)
 
 {
 	// d_f: 3D object array;    d_f[i,j,k] = d_f [k*M*N+j*M+i]; 
@@ -28,7 +23,7 @@ __global__ void forward_ray_driven_3d_kernel_correction(float *d_f , float *d_pr
     // Detector element center positions (X1): Coordinate in (x,y,z) system --- 
 	float vertex_x1_x = DOD * cos_theta - (Detector_Ymin +  Detector_x_idx * Detector_pixel_x) * sin_theta;
     float vertex_x1_y = DOD * sin_theta + (Detector_Ymin +  Detector_x_idx * Detector_pixel_x) * cos_theta;
-    float vertex_x1_z = Detector_Zmin + Detector_z_idx * Detector_pixel_x;
+    float vertex_x1_z = Detector_Zmin + (Z_prj/Number_of_Devices*subPrjIdx+Detector_z_idx) * Detector_pixel_x;
         //  Notice: in this system, vertex_x1_x < 0 < vertex_x2_x    
             
     float inv_x_diff = 1.0f / (vertex_x2_x - vertex_x1_x);
@@ -569,7 +564,14 @@ __global__ void forward_ray_driven_3d_kernel_correction(float *d_f , float *d_pr
 
 
 
-__global__ void backprj_ray_driven_3d_kernel(float *d_volumn_kernel, float *d_proj_correction, float beta_temp, float sin_theta, float cos_theta, int command)
+
+__global__ void kernel_add(float *d_a, float *d_b)
+{
+	int idx = blockDim.x * gridDim.x * gridDim.y * blockIdx.z + blockDim.x * gridDim.x * blockIdx.y +  blockDim.x * blockIdx.x + threadIdx.x; 
+    d_a[idx]=d_a[idx]+d_b[idx];
+}
+
+__global__ void backprj_ray_driven_3d_kernel_multiGPU(float *d_volumn_kernel, float *d_proj_correction, float beta_temp, float sin_theta, float cos_theta, int subVolIdx, int command)
 {    
     /* 
      * Reference: "Accelerating simultaneous algebraic reconstruction technique with motion compensation using CUDA-enabled GPU" 
@@ -592,8 +594,7 @@ __global__ void backprj_ray_driven_3d_kernel(float *d_volumn_kernel, float *d_pr
     //coordinate of center of each voxel in x-y-z system     
 	float coord_voxel_x = boundary_voxel_x + volumn_x*0.5f + Idx_voxel_x * volumn_x;
     float coord_voxel_y = boundary_voxel_y + volumn_y*0.5f + Idx_voxel_y * volumn_y;
-    float coord_voxel_z = boundary_voxel_z + volumn_z*0.5f + Idx_voxel_z * volumn_z;
-
+    float coord_voxel_z = boundary_voxel_z + volumn_z*(ZETA/Number_of_Devices*subVolIdx+0.5f) + Idx_voxel_z * volumn_z;   
 
     /**************************************/
         
@@ -781,7 +782,7 @@ __global__ void backprj_ray_driven_3d_kernel(float *d_volumn_kernel, float *d_pr
                     if (alpha_max-alpha_min>0)        // if the value is negative, it means the ray does not pass through this voxel
                     {
                         d_x1_x2 = sqrt((coord_source_x-coord_pixelOnDetector_x)*(coord_source_x-coord_pixelOnDetector_x) + (coord_source_y-coord_pixelOnDetector_y)*(coord_source_y - coord_pixelOnDetector_y) + (coord_source_z-coord_pixelOnDetector_z)*(coord_source_z-coord_pixelOnDetector_z) );
-                        temp = d_x1_x2*(alpha_max-alpha_min);
+                        float temp = d_x1_x2*(alpha_max-alpha_min);
                                 
                         if  ( temp > volumn_x*1e-6)
                             // the line passes through the voxel with a sufficient length; 
@@ -803,182 +804,13 @@ __global__ void backprj_ray_driven_3d_kernel(float *d_volumn_kernel, float *d_pr
                 if (command==0)
                     d_volumn_kernel[image_voxel_index] += beta_temp * sumWeight ;   // matched ajoint operator, for test use             
                 else if (command==1)
-                    d_volumn_kernel[image_voxel_index] += beta_temp * sumWeight/sumLength ;                  
+                    d_volumn_kernel[image_voxel_index] += beta_temp * sumWeight/sumLength ;                        
             }
                     
         }//end else if this voxel projects on this detector plane 
-    }//end else if the reconstruction region is in the circle
+    }//end else if the reconstruction region is in the circle           
     
 //     __syncthreads();
     
 }
  
-
-
-__global__ void reduce_norm_2_kernel_l1(float *g_idata, float *g_odata, unsigned int n)
-{
- 	
-	//load shared_mem
-	extern __shared__ float sdata[];
-	unsigned int tid = threadIdx.x;
-	unsigned int i = blockIdx.y* blockDim.x*gridDim.x + blockIdx.x*blockDim.x + threadIdx.x;
-
-	sdata[tid] = (i < n) ? (g_idata[i]*g_idata[i]) : 0;
-
-	__syncthreads();
-	// do reduction in shared mem
-	for(unsigned int s=blockDim.x/2; s>0; s>>=1)
-        {
-            if (tid < s)
-                {
-                        sdata[tid] += sdata[tid + s];
-                }
-            __syncthreads();
-        }
-    	// write result for this block to global mem
-	if (tid == 0) g_odata[blockIdx.y*gridDim.x + blockIdx.x]  = sdata[0];
-}
-
-__global__ void reduce_norm_tv_kernel_l1(float *g_idata, float *g_odata, unsigned int n)
-{
- 	
-	//load shared_mem
-	extern __shared__ float sdata[];
-        unsigned int tid = threadIdx.x;
-        unsigned int i = blockIdx.y* blockDim.x*gridDim.x + blockIdx.x*blockDim.x + threadIdx.x;
-
-	sdata[tid] = (i < n) ? (g_idata[i]) : 0;
-
-        __syncthreads();
-        // do reduction in shared mem
-	for(unsigned int s=blockDim.x/2; s>0; s>>=1)
-        {
-                if (tid < s)
-                {
-                        sdata[tid] += sdata[tid + s];
-                }
-        __syncthreads();
-        }
-    	// write result for this block to global mem
-	if (tid == 0) g_odata[blockIdx.y*gridDim.x + blockIdx.x]  = sdata[0];
-}
-
-__global__ void reduce_norm_2_kernel_l2(float *g_idata, float *g_odata, unsigned int n)
-{
-
-	//load shared mem 
-	extern __shared__ float sdata[];
-        unsigned int tid = threadIdx.x;
-        unsigned int i = blockIdx.x*blockDim.x + threadIdx.x;
-
-         sdata[tid] = (i < n) ? fabs(g_idata[i]) : 0;
-
-        __syncthreads();
-	// do reduction in shared mem
-        for(unsigned int s=blockDim.x/2; s>0; s>>=1)
-        {
-                if (tid < s)
-                {
-                        sdata[tid] += sdata[tid + s];
-                }
-        __syncthreads();
-        }
-	// write result for this block to global mem
-	if (tid == 0) g_odata[blockIdx.x] = sdata[0];
-
-}
-
-__global__ void reduce_norm_2_kernel_end(float *g_idata, float *g_odata, unsigned int n)
-{
- 
-        extern __shared__ float sdata[];
-        unsigned int tid = threadIdx.x;
-
-         sdata[tid] = (tid < n) ? fabs(g_idata[tid]) : 0;
-
-        __syncthreads();
-        // do reduction in shared mem
-        for(unsigned int s=blockDim.x/2; s>0; s>>=1)
-        {
-                if (tid < s)
-                {
-                        sdata[tid] += sdata[tid + s];
-                }
-        __syncthreads();
-        }
-	
-	// write result for this block to global mem
-        if (tid == 0) g_odata[0] = sqrt(sdata[0]);
-
-}
-
-
-__global__ void tv_gradient_matrix_3d_kernel(float *df, float *d_volumn, float epi)
-{
-        
-	int t_id, bx_id, by_id;
-        t_id  = threadIdx.x+1;
-        bx_id = blockIdx.x+1;
-        by_id = blockIdx.y+1;
-        float stl, s_sub_1_tl, s_t_sub_1_l, st_l_sub_1;
-        float s_add_1_tl, s_add_1_t_sub_1_l, s_add_1_t_l_sub_1;
-        float s_t_add_1_l, s_sub_1_t_add_1_l, s_t_add_1_l_sub_1;
-        float st_l_add_1, s_sub_1_t_l_add_1, s_t_sub_1_l_add_1;
-
-        stl             = d_volumn[by_id*N*M + bx_id*M + t_id];
-        s_sub_1_tl      = d_volumn[(by_id-1)*N*M + bx_id*M + t_id];
-        s_t_sub_1_l     = d_volumn[by_id*N*M + (bx_id-1)*M + t_id];
-        st_l_sub_1      = d_volumn[by_id*N*M + bx_id*M + t_id-1];
-
-        s_add_1_tl      = d_volumn[(by_id+1)*N*M + bx_id*M + t_id];
-        s_add_1_t_sub_1_l =  d_volumn[(by_id+1)*N*M + (bx_id-1)*M + t_id];
-        s_add_1_t_l_sub_1 =  d_volumn[(by_id+1)*N*M + bx_id*M + t_id-1];
-
-        s_t_add_1_l     = d_volumn[by_id*N*M + (bx_id+1)*M + t_id];
-        s_sub_1_t_add_1_l = d_volumn[(by_id-1)*N*M + (bx_id+1)*M + t_id];
-        s_t_add_1_l_sub_1 = d_volumn[by_id*N*M + (bx_id+1)*M + t_id-1];
-
-        st_l_add_1      =d_volumn[by_id*N*M + bx_id*M + t_id + 1];
-        s_sub_1_t_l_add_1 = d_volumn[(by_id-1)*N*M + bx_id*M + t_id + 1];
-        s_t_sub_1_l_add_1 = d_volumn[by_id*N*M + (bx_id-1)*M + t_id + 1];
-
-        df[by_id*N*M + bx_id*M + t_id] = ((stl - s_sub_1_tl) + (stl - s_t_sub_1_l) + (stl - st_l_sub_1) ) /sqrt(epi +  (stl - s_sub_1_tl)* (stl - s_sub_1_tl) + (stl - s_t_sub_1_l)* (stl - s_t_sub_1_l) +   (stl - st_l_sub_1)* (stl - st_l_sub_1) )
-        - (s_add_1_tl - stl)/sqrt(epi +  (s_add_1_tl - stl)*(s_add_1_tl - stl)  +  (s_add_1_tl - s_add_1_t_sub_1_l)*(s_add_1_tl - s_add_1_t_sub_1_l) + (s_add_1_tl - s_add_1_t_l_sub_1)*(s_add_1_tl - s_add_1_t_l_sub_1))
-
-        - (s_t_add_1_l - stl)/sqrt(epi +  (s_t_add_1_l - s_sub_1_t_add_1_l)*(s_t_add_1_l - s_sub_1_t_add_1_l) + (s_t_add_1_l - stl)*(s_t_add_1_l - stl) + (s_t_add_1_l - s_t_add_1_l_sub_1)* (s_t_add_1_l - s_t_add_1_l_sub_1))
-
-        - (st_l_add_1 - stl)/sqrt(epi +  (st_l_add_1 - s_sub_1_t_l_add_1)*(st_l_add_1 - s_sub_1_t_l_add_1) + (st_l_add_1 - s_t_sub_1_l_add_1)*(st_l_add_1 - s_t_sub_1_l_add_1) + (st_l_add_1 - stl)* (st_l_add_1 - stl));
-
-
-}
-
-
-__global__ void tv_matrix_3d_kernel(float *df, float *d_volumn)
-{
-        
-	int t_id, bx_id, by_id;
-        t_id  = threadIdx.x+1;
-        bx_id = blockIdx.x+1;
-        by_id = blockIdx.y+1;
-       
-	float stl, s_sub_1_tl, s_t_sub_1_l, st_l_sub_1;
-
-        stl             = d_volumn[by_id*N*M + bx_id*M + t_id];
-        s_sub_1_tl      = d_volumn[(by_id-1)*N*M + bx_id*M + t_id];
-        s_t_sub_1_l     = d_volumn[by_id*N*M + (bx_id-1)*M + t_id];
-        st_l_sub_1      = d_volumn[by_id*N*M + bx_id*M + t_id-1];
-
-	df[by_id*N*M + bx_id*M + t_id] = sqrt( (stl - s_sub_1_tl)*(stl - s_sub_1_tl) + (stl - s_t_sub_1_l)*(stl - s_t_sub_1_l) + (stl - st_l_sub_1)*(stl - st_l_sub_1)) ;
-
-}
-
-__global__ void backtracking_update_kernel(float *d_volumn_f_update,float *d_volumn_f, float *d_tv_gradient_matrix ,float alpha_temp)
-{
-     
-        unsigned int i = blockIdx.y* blockDim.x*gridDim.x + blockIdx.x*blockDim.x + threadIdx.x;	
-	d_volumn_f_update[i] = d_volumn_f[i] -  alpha_temp*d_tv_gradient_matrix[i];
-}
-
-
-///************ GHF new Code **************///
-

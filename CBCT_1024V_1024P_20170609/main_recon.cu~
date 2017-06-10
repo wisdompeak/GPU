@@ -18,6 +18,7 @@
 
 #define GPU_Device 0
 #define FBCT 0              // 0: CBCT;   1: multiple layer FBCT
+#define Number_of_Devices 2
 
 using namespace std;
 
@@ -28,10 +29,10 @@ const int FISTA = 1;
     // 0: SART + TV
     // 1: SART + TV + FISTA
 
-const float lambda_TV = 0.01f;         //regularization parameter for the tv norm
+const float lambda_TV = 0.00f;         //regularization parameter for the tv norm
 const float lambda_L1 = 0.00f;         //regularization parameter for the l1 norm
     
-const int Iter_num = 1; 
+const int Iter_num = 5; 
 const float Lip_con = 32.0f;
 
 // Distances
@@ -106,8 +107,10 @@ const int DenoiseOption = 1;
 // #endif
 
 #include "kernel_IterativeRecon_universal.cu"  //This version intergrate both CBCT and FBCT;
+#include "kernel_IterativeRecon_universal_multiGPU.cu"  
 
-#include "host_IterativeRecon_CBCT.c"
+#include "host_IterativeRecon_CBCT_multiGPU.c"
+// #include "host_IterativeRecon_CBCT.c"
 
 #include "host_FGP_Denoise_CPU.h"
 
@@ -180,6 +183,8 @@ const int DenoiseOption = 1;
 // 		printf("Error when initializing device! \n");
 // 		exit(-1);
 // 	}
+    
+    cudaSetDevice(0);
         
 	size_t d_proj_data_size = sizeof(float)*R*Z_prj*Nviews;
 	size_t d_volume_size = sizeof(float)*M*N*ZETA;
