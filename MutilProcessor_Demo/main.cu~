@@ -13,8 +13,7 @@
 
 using namespace std;
 
-// OpenMP 
-#include <omp.h>
+
 #define Max_num_device 	(3)
 #define threads_x 		(512)
 #define Block_x 		(512)
@@ -70,7 +69,8 @@ int main(int argc, char **argv)
        cudaEventCreate(&kernel_stop_event[i]);
    }    
 
-    
+   cout<<"Data Loading..."<<endl;   
+ 
    for (int i=0; i<Num_elem/Max_num_device; i++)
        h_recon[i]=1.0f;
    for (int i=Num_elem/Max_num_device; i<Num_elem/Max_num_device*2; i++)
@@ -94,7 +94,7 @@ int main(int argc, char **argv)
        cudaMalloc((void**)&d_recon_addr[i], single_gpu_chunk_size);  //blocking actions
        cudaMalloc((void**)&d_proj_addr[i], single_gpu_chunk_size); 
        cudaMemcpyAsync(d_recon_addr[i],h_recon+Num_elem/Max_num_device*i,single_gpu_chunk_size,cudaMemcpyDefault);                    
-   }   
+   }    
    
    cudaDeviceSynchronize();
             
@@ -114,11 +114,15 @@ int main(int argc, char **argv)
         cudaEventRecord(kernel_start_event[i],0);        
         kernel_forward_projection<<<dimgrid, dimblock>>>(d_recon_addr[i], d_proj_addr[i]);  
    }   
-      
+    for (int i=0; i<Max_num_device; i++)
+    {              
+        cudaSetDevice(i);
+        cudaDeviceSynchronize();
+    }       
 
 /***    AddProjection(d_proj_addr);  ***/
    
-   // method 1 (Best performance) 771ms
+   // method 1 (Best performance) 423ms
    // directly add on page-locked host memory w/ device memory; transfer from host to device
 //     cudaSetDevice(0);       
 //     for (int i=0; i<Max_num_device; i++)
@@ -126,99 +130,108 @@ int main(int argc, char **argv)
 //         cudaSetDevice(i);
 //         kernel_add<<<dimgrid, dimblock>>>(h_proj,d_proj_addr[i]);  
 //         cudaDeviceSynchronize();
-//     }    
+//     }   
 //     for (int i=0; i<Max_num_device; i++)
 //     {        
 //         cudaSetDevice(i); 
-//         cudaMemcpyAsync(d_proj_addr[i],h_proj+Num_elem/Max_num_device*0,single_gpu_chunk_size,cudaMemcpyDefault);
+//         cudaMemcpyAsync(d_proj_addr[i],h_proj,single_gpu_chunk_size,cudaMemcpyDefault);
 //     }  
+//     for (int i=0; i<Max_num_device; i++)
+//     {              
+//         cudaSetDevice(i);
+//         cudaDeviceSynchronize();
+//     }     
     
-    
-    // method 2, (2nd Best) 1032ms
+    // method 2, (2nd Best) 1071ms
     // import to page-locked host memory; add on GPU0 w/ host memory; transfer to host; transfer to GPUs
                        
-//     for (int i=1; i<Max_num_device; i++)
-//     {
-//         cudaSetDevice(i);
-//         cudaMemcpyAsync(h_proj+Num_elem/Max_num_device*i,d_proj_addr[i],single_gpu_chunk_size,cudaMemcpyDefault);
-//     }
-//     for (int i=1; i<Max_num_device; i++)
-//     {
-//         cudaSetDevice(i);
-//         cudaDeviceSynchronize();
-//     }   
-//     cudaSetDevice(0);
-//     for (int i=1; i<Max_num_device; i++)
-//     {        
-//         kernel_add<<<dimgrid, dimblock>>>(d_proj_addr[0],h_proj+Num_elem/Max_num_device*i);            
-//         cudaDeviceSynchronize();
-//     }                      
-//     cudaMemcpyAsync(h_proj,d_proj_addr[0],single_gpu_chunk_size,cudaMemcpyDefault);
-//     cudaDeviceSynchronize();    
-//     for (int i=0; i<Max_num_device; i++)
-//     {        
-//         cudaSetDevice(i); 
-//         cudaMemcpyAsync(d_proj_addr[i],h_proj+Num_elem/Max_num_device*0,single_gpu_chunk_size,cudaMemcpyDefault);
-//     }         
-    
-    
-    // method 3 (modeset
-    // add on GPU_0 w/ peer access; transfer to pinned memory; transfer to GPUs
-    cudaSetDevice(0);                   
     for (int i=1; i<Max_num_device; i++)
     {
-        cudaDeviceEnablePeerAccess(i,0);
-        kernel_add<<<dimgrid, dimblock>>>(d_proj_addr[0],d_proj_addr[i]);        
+        cudaSetDevice(i);
+        cudaMemcpyAsync(h_proj+Num_elem/Max_num_device*i,d_proj_addr[i],single_gpu_chunk_size,cudaMemcpyDefault);
+    }
+    for (int i=1; i<Max_num_device; i++)
+    {
+        cudaSetDevice(i);
         cudaDeviceSynchronize();
-    }                      
-    cudaMemcpyAsync(h_proj,d_proj_addr[0],single_gpu_chunk_size,cudaMemcpyDefault);
-    cudaDeviceSynchronize();    
+    }   
+    cudaSetDevice(0);
+    for (int i=1; i<Max_num_device; i++)
+    {        
+        kernel_add<<<dimgrid, dimblock>>>(h_proj,h_proj+Num_elem/Max_num_device*i);            
+    }
+    cudaDeviceSynchronize();
     for (int i=0; i<Max_num_device; i++)
     {        
         cudaSetDevice(i); 
-        cudaMemcpyAsync(d_proj_addr[i],h_proj+Num_elem/Max_num_device*0,single_gpu_chunk_size,cudaMemcpyDefault);
-    }    
+        cudaMemcpyAsync(d_proj_addr[i],h_proj,single_gpu_chunk_size,cudaMemcpyDefault);
+    }         
+    for (int i=0; i<Max_num_device; i++)
+    {
+        cudaSetDevice(i);
+        cudaDeviceSynchronize();
+    }      
     
-   //method 4
-//     cudaSetDevice(0);       
+    // method 3 (moderate) 4046ms
+    // add on GPU_0 w/ peer access; transfer to pinned memory; transfer to GPUs
+//     cudaSetDevice(0);                   
 //     for (int i=1; i<Max_num_device; i++)
-//     {        
-//         cudaDeviceEnablePeerAccess(i,0);        
-//         kernel_add<<<dimgrid, dimblock>>>(d_proj_addr[0],d_proj_addr[i]);
-//         cudaDeviceSynchronize();
+//     {
+//         cudaDeviceEnablePeerAccess(i,0);
+//         kernel_add<<<dimgrid, dimblock>>>(d_proj_addr[0],d_proj_addr[i]);        
 //     }    
-//     cudaStream_t stream[Max_num_device];
-//     for (int i=1; i<Max_num_device; i++)
-//         cudaStreamCreate(&stream[i]);
-//     for (int i=1; i<Max_num_device; i++)
-//     {        
-//         cudaDeviceEnablePeerAccess(i,0);        
-//         cudaMemcpyAsync(d_proj_addr[i],d_proj_addr[0],single_gpu_chunk_size,cudaMemcpyDefault,stream[i]);
-//     }  
-//     for (int i=1; i<Max_num_device; i++)
-//         cudaStreamDestroy(stream[i]);      
-    
-    
-       //method 5
-//     cudaSetDevice(0);       
-//     for (int i=0; i<Max_num_device; i++)
-//     {        
-//         cudaDeviceEnablePeerAccess(i,0);                
-//         kernel_add<<<dimgrid, dimblock>>>(h_proj,d_proj_addr[i]);  
-//         cudaDeviceSynchronize();
-//     }    
+//     cudaDeviceSynchronize();    // the above is actually serialized
+//     cudaMemcpy(h_proj,d_proj_addr[0],single_gpu_chunk_size,cudaMemcpyDefault);
 //     for (int i=0; i<Max_num_device; i++)
 //     {        
 //         cudaSetDevice(i); 
 //         cudaMemcpyAsync(d_proj_addr[i],h_proj+Num_elem/Max_num_device*0,single_gpu_chunk_size,cudaMemcpyDefault);
-//     }  
-    
-    
-    
-
-
-  
+//     }    
+//     for (int i=0; i<Max_num_device; i++)
+//     {
+//         cudaSetDevice(i);
+//         cudaDeviceSynchronize();
+//     }    
    
+    //method 4 (slow) 7062ms
+    // add on GPU_0 w/ peer access; transfer to GPUs w/ peer copy
+//     cudaSetDevice(0);       
+//     for (int i=1; i<Max_num_device; i++)
+//     {        
+//         cudaDeviceEnablePeerAccess(i,0);        
+//         kernel_add<<<dimgrid, dimblock>>>(d_proj_addr[0],d_proj_addr[i]);        
+//     }    
+//     cudaDeviceSynchronize();    
+//     // the above is actually serialized
+//     for (int i=1; i<Max_num_device; i++)
+//     {        
+//         cudaDeviceEnablePeerAccess(i,0);        
+//         cudaMemcpyAsync(d_proj_addr[i],d_proj_addr[0],single_gpu_chunk_size,cudaMemcpyDefault);
+//     }  
+//     cudaDeviceSynchronize();    
+    
+    //method 5 (slow) 9340ms    
+//     for (int i=1; i<Max_num_device; i++)
+//     {        
+//         cudaSetDevice(i);
+//         cudaDeviceEnablePeerAccess(0,0);        
+//         kernel_add<<<dimgrid, dimblock>>>(d_proj_addr[0],d_proj_addr[i]);        
+//     }   
+//     for (int i=0; i<Max_num_device; i++)
+//     {
+//         cudaSetDevice(i);
+//         cudaDeviceSynchronize();
+//     }        
+//     for (int i=1; i<Max_num_device; i++)
+//     {        
+//         cudaDeviceEnablePeerAccess(i,0);        
+//         cudaMemcpyAsync(d_proj_addr[i],d_proj_addr[0],single_gpu_chunk_size,cudaMemcpyDefault);
+//     }  
+//     for (int i=1; i<Max_num_device; i++)
+//     {
+//         cudaSetDevice(i);
+//         cudaDeviceSynchronize();
+//     }     
 
    
 /***    Backprojection  ***/
