@@ -114,6 +114,7 @@ const int DenoiseOption = 1;
     #include "host_IterativeRecon_CBCT.c"
 #else
     #include "host_IterativeRecon_CBCT_multiGPU.c"
+#endif
 
 #include "host_FGP_Denoise_CPU.h"
 
