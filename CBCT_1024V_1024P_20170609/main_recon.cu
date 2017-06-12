@@ -109,8 +109,11 @@ const int DenoiseOption = 1;
 #include "kernel_IterativeRecon_universal.cu"  //This version intergrate both CBCT and FBCT;
 #include "kernel_IterativeRecon_universal_multiGPU.cu"  // Always be inlcuded
 
-// #include "host_IterativeRecon_CBCT.c"
-#include "host_IterativeRecon_CBCT_multiGPU.c"  //either single or multi GPU version
+
+#if (0)   // 1: single GPU version;  0: multi GPU version
+    #include "host_IterativeRecon_CBCT.c"
+#else
+    #include "host_IterativeRecon_CBCT_multiGPU.c"
 
 #include "host_FGP_Denoise_CPU.h"
 
