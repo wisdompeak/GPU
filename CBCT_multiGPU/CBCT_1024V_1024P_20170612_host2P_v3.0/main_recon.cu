@@ -17,7 +17,7 @@
 #include <assert.h>
 
 #define Default_GPU 0
-#define Number_of_Devices 1   // if it is an odd, please modify your volume and projection size
+#define Number_of_Devices 2   // if it is an odd, please modify your volume and projection size
 #define FBCT 0              // 0: CBCT;   1: multiple layer FBCT
 #define DEBUG 1
 
@@ -33,7 +33,7 @@ const int FISTA = 1;
 const float lambda_TV = 0.00f;         //regularization parameter for the tv norm
 const float lambda_L1 = 0.00f;         //regularization parameter for the l1 norm
     
-const int Iter_num = 20; 
+const int Iter_num = 1; 
 const float Lip_con = 32.0f;
 
 // Distances
@@ -83,7 +83,7 @@ const float Detector_Zmin = -Detector_pixel_x*(float(Z_prj)/2.0f - 0.5f);
 const float PI = 3.141592653589793f; 
 
 // acquisition parameters
-const int Nviews = 220; 
+const int Nviews = 2; 
 const float us_rate = 1.00f; 
 const float initialAngle= 0.00f ;
 const float shiftAngle= 0.0f;

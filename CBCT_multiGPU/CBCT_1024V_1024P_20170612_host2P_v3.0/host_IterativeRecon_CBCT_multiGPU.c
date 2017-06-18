@@ -78,7 +78,8 @@ void Reconstruction_3D_ray_driven_CBCT(float *h_volume, float *h_proj_data, floa
             
         cudaMemset(h_proj_sumLen, 0, size_proj_single);
         cudaMemset(h_proj_weightedLen, 0, size_proj_single);
-        
+        cudaDeviceSynchronize();
+                
         for (int i=0; i<Number_of_Devices; i++)
         {
             cudaSetDevice(i); 
@@ -92,8 +93,10 @@ void Reconstruction_3D_ray_driven_CBCT(float *h_volume, float *h_proj_data, floa
         cudaDeviceSynchronize(); 
                 
 //         // test purpose
-//         SaveDeviceDataToFile(h_proj_sumLen,R*Z_prj,"../projCheckv30.data");        
+//         SaveDeviceDataToFile(h_proj_single,R*Z_prj,"../projCheck2.data");        
 //         exit(0);
+        
+//         cout<<h_proj_single[R*400+400]<<endl;
                 
         /************ Backprojection **********************/
                       
@@ -243,6 +246,7 @@ void Forward_3D_ray_driven_siddon(float *h_volume, float *h_proj_data)
                   
         cudaSetDevice(Default_GPU); 
         cudaMemcpyAsync(h_proj_data+Z_prj*R*j,h_proj_single,size_proj_single,cudaMemcpyDefault); 
+                
 	}        
     
     // End Timer
