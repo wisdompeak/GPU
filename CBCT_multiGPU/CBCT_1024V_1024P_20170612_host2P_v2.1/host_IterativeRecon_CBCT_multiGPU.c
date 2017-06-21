@@ -75,9 +75,8 @@ void Reconstruction_3D_ray_driven_CBCT(float *h_volume, float *h_proj_data, floa
             cudaDeviceSynchronize();
         }             
             
-        cudaMemset(h_proj_sumLen, 0, size_proj_single);
-        cudaMemset(h_proj_weightedLen, 0, size_proj_single);
-        cudaDeviceSynchronize();
+        memset(h_proj_sumLen, 0, size_proj_single);
+        memset(h_proj_weightedLen, 0, size_proj_single);
         
         for (int i=0; i<Number_of_Devices; i++)
         {

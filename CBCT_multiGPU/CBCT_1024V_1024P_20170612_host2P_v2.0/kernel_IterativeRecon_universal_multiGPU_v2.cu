@@ -35,7 +35,7 @@ __global__ void forward_ray_driven_3d_kernel_correction_multiGPU(float *d_f , fl
     float vertex_x2_y = Source_x * sin_theta + Source_y * cos_theta;
 	float vertex_x2_z;
     if (FBCT)
-        vertex_x2_z = Detector_Zmin + Detector_z_idx * Detector_pixel_x;  // FBCT geometry
+        vertex_x2_z = Detector_Zmin + (Z_prj/Number_of_Devices*subPrjIdx+Detector_z_idx) * Detector_pixel_x;  // FBCT geometry
     else
         vertex_x2_z = Source_z;  // CBCT geometry
     
